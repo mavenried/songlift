@@ -2,8 +2,8 @@ use std::sync::mpsc::Sender;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
-use crate::itunes::{self, TrackData};
 use crate::download;
+use crate::itunes::{self, TrackData};
 
 fn default_output_dir() -> String {
     dirs::download_dir()
@@ -327,43 +327,60 @@ impl App {
         let total = pending.len();
 
         std::thread::spawn(move || {
-            let mut done = 0usize;
+            let completed = std::sync::Mutex::new(0usize);
+            let downloaded = std::sync::atomic::AtomicUsize::new(0);
 
-            for (id, data) in pending {
-                let query = if data.artist.is_empty() {
-                    data.title.clone()
-                } else {
-                    format!("{} — {}", data.artist, data.title)
-                };
+            for batch in pending.chunks(8) {
+                std::thread::scope(|scope| {
+                    for (id, data) in batch {
+                        let tx = tx.clone();
+                        let output_dir = output_dir.clone();
+                        let quality = quality.clone();
+                        let completed = &completed;
+                        let downloaded = &downloaded;
+                        let id = *id;
+                        let data = data.clone();
 
-                let _ = tx.send(AppMsg::Log(LogEntry::Info(format!("⟳  {query}"))));
-                let _ = tx.send(AppMsg::SetStatus(id, TrackStatus::Downloading));
+                        scope.spawn(move || {
+                            let query = if data.artist.is_empty() {
+                                data.title.clone()
+                            } else {
+                                format!("{} — {}", data.artist, data.title)
+                            };
 
-                match download::download_track(&data, &output_dir, &quality) {
-                    Ok(path) => {
-                        let _ = tx.send(AppMsg::SetStatus(id, TrackStatus::Embedding));
-                        if let Err(e) = download::embed_metadata(&path, &data) {
-                            let _ = tx.send(AppMsg::Log(LogEntry::Error(format!(
-                                "   ⚠ metadata: {e}"
-                            ))));
-                        }
-                        done += 1;
-                        let _ = tx.send(AppMsg::SetStatus(id, TrackStatus::Done));
-                        let _ = tx.send(AppMsg::Log(LogEntry::Success("   ✓ saved".into())));
+                            let _ = tx.send(AppMsg::Log(LogEntry::Info(format!("⟳  {query}"))));
+                            let _ = tx.send(AppMsg::SetStatus(id, TrackStatus::Downloading));
+
+                            match download::download_track(&data, &output_dir, &quality) {
+                                Ok(path) => {
+                                    let _ = tx.send(AppMsg::SetStatus(id, TrackStatus::Embedding));
+                                    if let Err(e) = download::embed_metadata(&path, &data) {
+                                        let _ = tx.send(AppMsg::Log(LogEntry::Error(format!(
+                                            "   ⚠ metadata: {e}"
+                                        ))));
+                                    }
+                                    let _ = tx.send(AppMsg::SetStatus(id, TrackStatus::Done));
+                                    let _ = tx.send(AppMsg::Log(LogEntry::Success("   ✓ saved".into())));
+                                    downloaded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                Err(e) => {
+                                    let msg = e.to_string();
+                                    let _ = tx.send(AppMsg::SetStatus(
+                                        id,
+                                        TrackStatus::Failed(msg.clone()),
+                                    ));
+                                    let _ = tx.send(AppMsg::Log(LogEntry::Error(format!("   ✗ {msg}"))));
+                                }
+                            }
+                            let mut done = completed.lock().unwrap();
+                            *done += 1;
+                            let _ = tx.send(AppMsg::Progress(*done, total));
+                        });
                     }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        let _ = tx.send(AppMsg::SetStatus(
-                            id,
-                            TrackStatus::Failed(msg.clone()),
-                        ));
-                        let _ = tx.send(AppMsg::Log(LogEntry::Error(format!("   ✗ {msg}"))));
-                    }
-                }
-
-                let _ = tx.send(AppMsg::Progress(done, total));
+                });
             }
 
+            let done = downloaded.load(std::sync::atomic::Ordering::Relaxed);
             let _ = tx.send(AppMsg::Log(LogEntry::Success(format!(
                 "{done}/{total} tracks downloaded."
             ))));
