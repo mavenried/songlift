@@ -3,26 +3,24 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{
-        Block, BorderType, Borders, Cell, Gauge, Paragraph, Row, Table, TableState,
-    },
+    widgets::{Block, BorderType, Borders, Cell, Gauge, Paragraph, Row, Table, TableState},
 };
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, LogEntry, TrackStatus};
 
-const SPINNER: &[&str] = &["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 fn spinner_frame(tick: u8) -> &'static str {
     SPINNER[(tick as usize / 2) % SPINNER.len()]
 }
 
-const C_ACCENT:   Color = Color::Magenta;
-const C_SUCCESS:  Color = Color::Green;
-const C_WARN:     Color = Color::Yellow;
-const C_ERROR:    Color = Color::Red;
-const C_DIM:      Color = Color::DarkGray;
-const C_EMBED:    Color = Color::Cyan;
+const C_ACCENT: Color = Color::Magenta;
+const C_SUCCESS: Color = Color::Green;
+const C_WARN: Color = Color::Yellow;
+const C_ERROR: Color = Color::Red;
+const C_DIM: Color = Color::DarkGray;
+const C_EMBED: Color = Color::Cyan;
 
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.area();
@@ -31,14 +29,12 @@ pub fn render(f: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
         .border_style(Style::default().fg(C_ACCENT))
-        .title(Line::from(vec![
-            Span::styled(" appldown ", Style::default().fg(C_ACCENT).bold()),
-        ]))
+        .title(Line::from(vec![Span::styled(
+            " songlift ",
+            Style::default().fg(C_ACCENT).bold(),
+        )]))
         .title_bottom(Line::from(vec![
-            Span::styled(
-                " Enter",
-                Style::default().fg(C_ACCENT).bold(),
-            ),
+            Span::styled(" Enter", Style::default().fg(C_ACCENT).bold()),
             Span::raw(":add  "),
             Span::styled("F5", Style::default().fg(C_ACCENT).bold()),
             Span::raw(":fetch  "),
@@ -79,7 +75,7 @@ fn draw_url_input(f: &mut Frame, app: &App, area: Rect) {
 
     let (text, style) = if app.input.is_empty() {
         (
-            "Paste an Apple Music URL and press Enter…".to_string(),
+            "Paste an Apple Music, Spotify, or YouTube Music URL and press Enter…".to_string(),
             Style::default().fg(C_DIM).italic(),
         )
     } else {
@@ -93,13 +89,23 @@ fn draw_url_input(f: &mut Frame, app: &App, area: Rect) {
     } else {
         0
     };
-    let displayed: String = app.input.chars().skip(scroll_start).take(visible_width).collect();
-    let displayed = if app.input.is_empty() { text } else { displayed };
+    let displayed: String = app
+        .input
+        .chars()
+        .skip(scroll_start)
+        .take(visible_width)
+        .collect();
+    let displayed = if app.input.is_empty() {
+        text
+    } else {
+        displayed
+    };
 
     f.render_widget(Paragraph::new(displayed).style(style), inner);
 
     if !app.input.is_empty() {
-        let cursor_offset = app.input
+        let cursor_offset = app
+            .input
             .chars()
             .skip(scroll_start)
             .take(app.cursor.saturating_sub(scroll_start))
@@ -112,10 +118,7 @@ fn draw_url_input(f: &mut Frame, app: &App, area: Rect) {
 fn draw_main(f: &mut Frame, app: &App, area: Rect) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(28),
-            Constraint::Min(40),
-        ])
+        .constraints([Constraint::Length(28), Constraint::Min(40)])
         .split(area);
 
     draw_url_list(f, app, cols[0]);
@@ -203,10 +206,7 @@ fn draw_track_table(f: &mut Frame, app: &App, area: Rect) {
 fn draw_bottom(f: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(3),
-        ])
+        .constraints([Constraint::Length(3), Constraint::Min(3)])
         .split(area);
 
     draw_progress(f, app, rows[0]);
@@ -268,10 +268,7 @@ fn draw_log(f: &mut Frame, app: &App, area: Rect) {
 
 fn status_style(status: &TrackStatus, tick: u8) -> (String, Style) {
     match status {
-        TrackStatus::Pending => (
-            "○ pending".to_string(),
-            Style::default().fg(C_DIM),
-        ),
+        TrackStatus::Pending => ("○ pending".to_string(), Style::default().fg(C_DIM)),
         TrackStatus::Downloading => (
             format!("{} downloading", spinner_frame(tick)),
             Style::default().fg(C_WARN).bold(),
@@ -280,29 +277,17 @@ fn status_style(status: &TrackStatus, tick: u8) -> (String, Style) {
             format!("{} embedding", spinner_frame(tick)),
             Style::default().fg(C_EMBED).bold(),
         ),
-        TrackStatus::Done => (
-            "✓ done".to_string(),
-            Style::default().fg(C_SUCCESS).bold(),
-        ),
-        TrackStatus::Failed(_) => (
-            "✗ failed".to_string(),
-            Style::default().fg(C_ERROR).bold(),
-        ),
+        TrackStatus::Done => ("✓ done".to_string(), Style::default().fg(C_SUCCESS).bold()),
+        TrackStatus::Failed(_) => ("✗ failed".to_string(), Style::default().fg(C_ERROR).bold()),
     }
 }
 
 fn log_line(entry: &LogEntry) -> Line<'static> {
     match entry {
         LogEntry::Info(s) => Line::from(s.clone()),
-        LogEntry::Success(s) => {
-            Line::from(Span::styled(s.clone(), Style::default().fg(C_SUCCESS)))
-        }
-        LogEntry::Error(s) => {
-            Line::from(Span::styled(s.clone(), Style::default().fg(C_ERROR)))
-        }
-        LogEntry::Dim(s) => {
-            Line::from(Span::styled(s.clone(), Style::default().fg(C_DIM)))
-        }
+        LogEntry::Success(s) => Line::from(Span::styled(s.clone(), Style::default().fg(C_SUCCESS))),
+        LogEntry::Error(s) => Line::from(Span::styled(s.clone(), Style::default().fg(C_ERROR))),
+        LogEntry::Dim(s) => Line::from(Span::styled(s.clone(), Style::default().fg(C_DIM))),
     }
 }
 

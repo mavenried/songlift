@@ -1,8 +1,8 @@
-# appldown
+# songlift
 
-A terminal UI for downloading Apple Music tracks, albums, and playlists as MP3s with embedded ID3 metadata.
+A terminal UI for downloading tracks, albums, and playlists from Apple Music, Spotify, and YouTube Music as MP3s with embedded ID3 metadata.
 
-Paste an Apple Music URL, fetch its track list via the iTunes API, then download each track through `yt-dlp` and tag it (title, artist, album, artwork, and more).
+Paste a supported music URL, fetch its track information, then download each track through `yt-dlp` and tag it (title, artist, album, artwork, and more). Search results are taken from YouTube Music.
 
 ## Requirements
 
@@ -26,9 +26,9 @@ cargo run --release
 | `PageUp` / `PageDown` | Scroll the log                    |
 | `Ctrl+C` / `q`        | Quit                              |
 
-Supported URL types: Apple Music album, track, and playlist links.
+Supported URL types: Apple Music album, track, and playlist links; Spotify track links; and YouTube Music track, album, and playlist links. Spotify support uses Spotify's public embed metadata, so Spotify albums and playlists may resolve only to the single item exposed by that metadata.
 
-Downloaded files are saved to `appldown/` inside your system's Downloads folder (e.g. `~/Downloads/appldown`) at 320 kbps by default.
+Downloaded files are saved to `songlift/` inside your system's Downloads folder (e.g. `~/Downloads/songlift`) at 320 kbps by default.
 
 ## Disclaimer
 

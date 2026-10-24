@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
-use id3::{Content, Frame, Tag, TagLike, Version};
+use anyhow::{Result, anyhow};
 use id3::frame::{Picture, PictureType};
+use id3::{Content, Frame, Tag, TagLike, Version};
 use regex::Regex;
 
 use crate::itunes::TrackData;
@@ -43,15 +43,15 @@ pub fn download_track(data: &TrackData, output_dir: &str, quality: &str) -> Resu
             "--no-warnings",
             "-o",
             &outtmpl,
-            &format!("ytsearch1:{query}"),
+            &format!(
+                "https://music.youtube.com/search?q={}",
+                url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>()
+            ),
         ])
         .status()?;
 
     if !status.success() {
-        return Err(anyhow!(
-            "yt-dlp exited with code {:?}",
-            status.code()
-        ));
+        return Err(anyhow!("yt-dlp exited with code {:?}", status.code()));
     }
 
     let mp3 = PathBuf::from(output_dir).join(format!("{filename}.mp3"));

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use regex::Regex;
 use serde::Deserialize;
 use url::Url;
@@ -63,6 +63,13 @@ struct ItunesItem {
 
 pub fn resolve_url(raw_url: &str) -> Result<Vec<TrackData>> {
     let parsed = Url::parse(raw_url).map_err(|e| anyhow!("Invalid URL: {e}"))?;
+    let host = parsed.host_str().unwrap_or_default();
+    if host == "open.spotify.com" || host == "spotify.com" || host.ends_with(".spotify.com") {
+        return fetch_spotify(raw_url);
+    }
+    if host == "music.youtube.com" {
+        return fetch_youtube_music(raw_url);
+    }
     let path = parsed.path().trim_matches('/');
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
 
@@ -98,8 +105,93 @@ pub fn resolve_url(raw_url: &str) -> Result<Vec<TrackData>> {
     }
 
     Err(anyhow!(
-        "Unrecognized URL — expected an Apple Music album, track, or playlist link"
+        "Unrecognized URL — expected an Apple Music, Spotify, or YouTube Music link"
     ))
+}
+
+#[derive(Deserialize)]
+struct SpotifyOEmbed {
+    title: String,
+    author_name: String,
+}
+
+fn fetch_spotify(url: &str) -> Result<Vec<TrackData>> {
+    let endpoint = format!(
+        "https://open.spotify.com/oembed?url={}",
+        urlencoding::encode(url)
+    );
+    let response: SpotifyOEmbed = reqwest::blocking::get(endpoint)?
+        .error_for_status()?
+        .json()?;
+    let title = response.title.trim().to_string();
+    let artist = response.author_name.trim().to_string();
+    if title.is_empty() {
+        return Err(anyhow!(
+            "Spotify did not return track metadata for this link"
+        ));
+    }
+    Ok(vec![itunes_search(&artist, &title).unwrap_or(TrackData {
+        artist,
+        title,
+        ..Default::default()
+    })])
+}
+
+fn fetch_youtube_music(url: &str) -> Result<Vec<TrackData>> {
+    let output = std::process::Command::new("yt-dlp")
+        .args([
+            "--flat-playlist",
+            "--dump-single-json",
+            "--no-warnings",
+            url,
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(anyhow!("yt-dlp could not read this YouTube Music link"));
+    }
+    let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let items: Vec<&serde_json::Value> = data
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .map(|entries| entries.iter().collect())
+        .unwrap_or_else(|| vec![&data]);
+    let tracks: Vec<TrackData> = items
+        .into_iter()
+        .filter_map(|item| {
+            let title = item
+                .get("track")
+                .or_else(|| item.get("title"))?
+                .as_str()?
+                .trim();
+            if title.is_empty() {
+                return None;
+            }
+            let artist = item
+                .get("artist")
+                .or_else(|| item.get("uploader"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some(TrackData {
+                title: title.to_string(),
+                artist,
+                album: item
+                    .get("album")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                duration_ms: item
+                    .get("duration")
+                    .and_then(|v| v.as_f64())
+                    .map(|d| (d * 1000.0) as u64),
+                ..Default::default()
+            })
+        })
+        .collect();
+    if tracks.is_empty() {
+        return Err(anyhow!("No tracks found at this YouTube Music link"));
+    }
+    Ok(tracks)
 }
 
 fn fetch_track(track_id: &str) -> Result<Vec<TrackData>> {
@@ -117,12 +209,7 @@ fn fetch_album(album_id: &str) -> Result<Vec<TrackData>> {
         .filter(|i| i.wrapper_type == "track")
         .map(item_to_track)
         .collect();
-    tracks.sort_by_key(|t| {
-        (
-            t.disk_number.unwrap_or(0),
-            t.track_number.unwrap_or(0),
-        )
-    });
+    tracks.sort_by_key(|t| (t.disk_number.unwrap_or(0), t.track_number.unwrap_or(0)));
     Ok(tracks)
 }
 
@@ -199,10 +286,9 @@ fn fetch_playlist(url: &str) -> Result<Vec<TrackData>> {
 }
 
 fn scrape_tracks_from_html(html: &str) -> Vec<(String, String, String)> {
-    let re_serialized = Regex::new(
-        r#"(?s)<script[^>]+id=["']serialized-server-data["'][^>]*>(.*?)</script>"#,
-    )
-    .unwrap();
+    let re_serialized =
+        Regex::new(r#"(?s)<script[^>]+id=["']serialized-server-data["'][^>]*>(.*?)</script>"#)
+            .unwrap();
     if let Some(cap) = re_serialized.captures(html) {
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&cap[1]) {
             let tracks = extract_serialized_tracks(&data);
@@ -212,10 +298,9 @@ fn scrape_tracks_from_html(html: &str) -> Vec<(String, String, String)> {
         }
     }
 
-    let re_jsonld = Regex::new(
-        r#"(?s)<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>"#,
-    )
-    .unwrap();
+    let re_jsonld =
+        Regex::new(r#"(?s)<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>"#)
+            .unwrap();
     for cap in re_jsonld.captures_iter(html) {
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&cap[1]) {
             let tracks = extract_jsonld_tracks(&data);
@@ -251,8 +336,16 @@ fn extract_serialized_tracks(v: &serde_json::Value) -> Vec<(String, String, Stri
                 .and_then(|k| k.as_str())
                 == Some("song");
             if is_song {
-                let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let artist = obj.get("artistName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let title = obj
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let artist = obj
+                    .get("artistName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if !title.is_empty() && !artist.is_empty() {
                     let album = obj
                         .get("tertiaryLinks")
@@ -304,9 +397,11 @@ fn extract_jsonld_tracks(v: &serde_json::Value) -> Vec<(String, String, String)>
                             .unwrap_or("")
                             .to_string();
                         let artist = match item.get("byArtist") {
-                            Some(serde_json::Value::Object(a)) => {
-                                a.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string()
-                            }
+                            Some(serde_json::Value::Object(a)) => a
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
                             Some(serde_json::Value::String(s)) => s.clone(),
                             _ => String::new(),
                         };
@@ -373,8 +468,9 @@ mod urlencoding {
         let mut out = String::with_capacity(s.len());
         for b in s.bytes() {
             match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-                | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(b as char)
+                }
                 b' ' => out.push('+'),
                 other => out.push_str(&format!("%{other:02X}")),
             }

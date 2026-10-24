@@ -7,7 +7,7 @@ use crate::itunes::{self, TrackData};
 
 fn default_output_dir() -> String {
     dirs::download_dir()
-        .map(|d| d.join("appldown"))
+        .map(|d| d.join("songlift"))
         .unwrap_or_else(|| std::path::PathBuf::from("downloads"))
         .to_string_lossy()
         .into_owned()
@@ -91,7 +91,7 @@ impl App {
             next_id: 0,
         };
         app.log(LogEntry::Dim(
-            "appldown — paste a URL and press Enter, then F5 to fetch, F6 to download.".into(),
+            "songlift — paste a URL and press Enter, then F5 to fetch, F6 to download.".into(),
         ));
         app
     }
@@ -145,9 +145,7 @@ impl App {
             }
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.input.chars().count(),
-            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.cursor = 0
-            }
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => self.cursor = 0,
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.cursor = self.input.chars().count()
             }
@@ -360,7 +358,8 @@ impl App {
                                         ))));
                                     }
                                     let _ = tx.send(AppMsg::SetStatus(id, TrackStatus::Done));
-                                    let _ = tx.send(AppMsg::Log(LogEntry::Success("   ✓ saved".into())));
+                                    let _ = tx
+                                        .send(AppMsg::Log(LogEntry::Success("   ✓ saved".into())));
                                     downloaded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                 }
                                 Err(e) => {
@@ -369,7 +368,8 @@ impl App {
                                         id,
                                         TrackStatus::Failed(msg.clone()),
                                     ));
-                                    let _ = tx.send(AppMsg::Log(LogEntry::Error(format!("   ✗ {msg}"))));
+                                    let _ = tx
+                                        .send(AppMsg::Log(LogEntry::Error(format!("   ✗ {msg}"))));
                                 }
                             }
                             let mut done = completed.lock().unwrap();
