@@ -172,7 +172,7 @@ fn fetch_youtube_music(url: &str) -> Result<Vec<TrackData>> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            Some(TrackData {
+            let track = TrackData {
                 title: title.to_string(),
                 artist,
                 album: item
@@ -185,7 +185,8 @@ fn fetch_youtube_music(url: &str) -> Result<Vec<TrackData>> {
                     .and_then(|v| v.as_f64())
                     .map(|d| (d * 1000.0) as u64),
                 ..Default::default()
-            })
+            };
+            Some(itunes_search(&track.artist, &track.title).unwrap_or(track))
         })
         .collect();
     if tracks.is_empty() {

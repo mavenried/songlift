@@ -34,13 +34,24 @@ pub fn download_track(data: &TrackData, output_dir: &str, quality: &str) -> Resu
             "-x",
             "--audio-format",
             "mp3",
+            "--embed-thumbnail",
+            "--convert-thumbnails",
+            "png",
+            "--no-keep-video",
+            "--embed-metadata",
+            "--ppa",
+            "EmbedThumbnail+ffmpeg_o:-c:v png -vf crop=in_h:in_h",
+            "--no-overwrites",
             "--audio-quality",
             &format!("{quality}k"),
             "--match-filter",
             "duration < 1200",
             "--no-playlist",
+            "--playlist-items",
+            "1",
             "--quiet",
             "--no-warnings",
+            "--progress",
             "-o",
             &outtmpl,
             &format!(
@@ -63,11 +74,17 @@ pub fn download_track(data: &TrackData, output_dir: &str, quality: &str) -> Resu
 }
 
 pub fn embed_metadata(path: &Path, data: &TrackData) -> Result<()> {
-    let mut tag = Tag::new();
+    let mut tag = Tag::read_from_path(path).unwrap_or_else(|_| Tag::new());
 
-    tag.set_title(&data.title);
-    tag.set_artist(&data.artist);
-    tag.set_album(&data.album);
+    if !data.title.is_empty() {
+        tag.set_title(&data.title);
+    }
+    if !data.artist.is_empty() {
+        tag.set_artist(&data.artist);
+    }
+    if !data.album.is_empty() {
+        tag.set_album(&data.album);
+    }
 
     if let Ok(y) = data.year.parse::<i32>() {
         tag.set_year(y);
@@ -103,6 +120,7 @@ pub fn embed_metadata(path: &Path, data: &TrackData) -> Result<()> {
 
     if let Some(url) = &data.artwork_url {
         if let Ok(bytes) = fetch_bytes(url) {
+            tag.remove_all_pictures();
             tag.add_frame(Picture {
                 mime_type: "image/jpeg".to_string(),
                 picture_type: PictureType::CoverFront,
